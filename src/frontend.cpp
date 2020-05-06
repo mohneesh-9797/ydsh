@@ -266,7 +266,8 @@ FrontEnd::Ret FrontEnd::loadModule(DSError *dsError) {
     const char *modPath = node.getPathList()[pathIndex].c_str();
     node.setCurIndex(pathIndex + 1);
     FilePtr filePtr;
-    auto ret = this->getSymbolTable().tryToLoadModule(this->getCurScriptDir(), modPath, filePtr);
+    auto ret = this->getSymbolTable().tryToLoadModule(
+            node.getPathNode().getType().is(TYPE::String) ? this->getCurScriptDir() : nullptr, modPath, filePtr);
     if(is<ModLoadingError>(ret)) {
         auto e = get<ModLoadingError>(ret);
         if(e == ModLoadingError::NOT_FOUND && node.isOptional()) {
