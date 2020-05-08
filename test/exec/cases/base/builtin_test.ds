@@ -32,7 +32,7 @@ assert($? == 1)
 test -z $'\x00hfoe'
 assert($? == 1)
 
-# compare
+# string compare
 test AA "<" BBB
 assert($? == 0)
 
@@ -109,7 +109,7 @@ test 9223372036854775807 -ge 9223372036854775807
 assert($? == 0)
 
 
-# file operator
+# unary file operator
 test -a hogeuhfaer
 assert($? == 1)
 
@@ -149,7 +149,8 @@ assert($? == 0)
 test -k .
 assert($? == 1)
 
-var pipe = "hogefaefpdew_pipe"
+let tmp_dir = "$(mktemp -d 2> /dev/null || mktemp -d -t lfreop)"
+var pipe = "$tmp_dir/hogefaefpdew_pipe"
 mkfifo $pipe
 test -p $pipe
 assert($? == 0)
@@ -191,6 +192,85 @@ assert($? == 0)
 
 rm -f $pipe
 
+# binary file op
+## compare file
+test hfuerhfueria -ef fhaerfhure
+assert $? == 1
+
+test . -ef .
+assert $? == 0
+
+test . -ef fherufhiae
+assert $? == 1
+
+test fhurefe -ef .
+assert $? == 1
+
+test . -ef /dev/null
+assert $? == 1
+
+assert "/dev/stdin" != "/dev/stdout".realpath()!
+test /dev/stdin -ef ${"/dev/stdout".realpath()!}
+assert $? == 0
+
+## compare timestamp
+let AAA = "$tmp_dir/AAA"
+let BBB = "$tmp_dir/BBB"
+
+echo hello >> $AAA
+assert test -f $AAA
+touch $AAA
+sync
+
+sleep 1
+
+echo world >> $BBB
+assert test -f $BBB
+touch $BBB
+echo hgeoho >> $BBB
+sync
+
+### newer timestamp
+test hfarieo -nt fhnreufhreui
+assert $? == 1
+
+test $AAA -nt fhnreufhreui
+assert $? == 1
+
+test fhurehfe -nt $AAA
+assert $? == 1
+
+test $AAA -nt $AAA
+assert $? == 1 : "$(stat $AAA $BBB)"
+
+test $AAA -nt $BBB
+assert $? == 1 : "$(stat $AAA $BBB)"
+
+test $BBB -nt $AAA
+assert $? == 0 : "$(stat $AAA $BBB)"
+
+### older timestamp
+test hfarieo -ot fhnreufhreui
+assert $? == 1
+
+test $AAA -ot fhnreufhreui
+assert $? == 1
+
+test fhurehfe -ot $BBB
+assert $? == 1
+
+test $BBB -ot $BBB
+assert $? == 1 : "$(stat $AAA $BBB)"
+
+test $AAA -ot $BBB
+assert $? == 0 : "$(stat $AAA $BBB)"
+
+test $BBB -ot $AAA
+assert $? == 1 : "$(stat $AAA $BBB)"
+
+### same timestamp
+assert !test $AAA -nt $AAA && !test $AAA -ot $AAA
+
 # invalid option
 test 34 -h 34
 assert($? == 2)
@@ -204,4 +284,5 @@ assert($? == 2)
 test hoge hoge
 assert($? == 2)
 
+rm -rf $tmp_dir
 true
