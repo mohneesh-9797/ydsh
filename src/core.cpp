@@ -182,20 +182,14 @@ void raiseSystemError(DSState &st, int errorNum, std::string &&message) {
     raiseError(st, TYPE::SystemError, std::move(str));
 }
 
-const char *getWorkingDir(const DSState &st, bool useLogical, std::string &buf) {
+CStrPtr getWorkingDir(const DSState &st, bool useLogical) {
     if(useLogical) {
         if(!S_ISDIR(getStMode(st.logicalWorkingDir.c_str()))) {
             return nullptr;
         }
-        buf = st.logicalWorkingDir;
-    } else {
-        auto ptr = getCWD();
-        if(ptr == nullptr) {
-            return nullptr;
-        }
-        buf = ptr.get();
+        return CStrPtr(strdup(st.logicalWorkingDir.c_str()));
     }
-    return buf.c_str();
+    return getCWD();
 }
 
 bool changeWorkingDir(DSState &st, const char *dest, const bool useLogical) {
@@ -338,13 +332,14 @@ std::string expandDots(const char *basePath, const char *path) {
 
     // fill resolvedPathStack
     if(!pathStack.empty() && pathStack.front() != "/") {
-        if(basePath != nullptr && *basePath != '\0') {
+        if(basePath != nullptr && *basePath == '/') {
             resolvedPathStack = createPathStack(basePath);
         } else {
             auto ptr = getCWD();
-            if(ptr) {
-                resolvedPathStack = createPathStack(ptr.get());
+            if(!ptr) {
+                return str;
             }
+            resolvedPathStack = createPathStack(ptr.get());
         }
     }
 
@@ -388,15 +383,29 @@ void expandTilde(std::string &str) {
             expanded = pw->pw_dir;
         }
     } else if(expanded == "~+") {
+        /**
+         * if PWD indicates valid dir, use PWD.
+         * if PWD is invalid, use cwd
+         * if cwd is removed, not expand
+         */
         auto cwd = getCWD();
         if(cwd) {
-            expanded = cwd.get();
+            const char *pwd = getenv(ENV_PWD);
+            if(pwd && *pwd == '/' && isSameFile(pwd, cwd.get())) {
+                expanded = pwd;
+            } else {
+                expanded = cwd.get();
+            }
         }
     } else if(expanded == "~-") {
-        const char *env = getenv(ENV_OLDPWD);
-        if(env != nullptr) {
-            expanded = env;
-        }
+        /**
+         * if OLDPWD indicates valid dir, use OLDPWD
+         * if OLDPWD is invalid, not expand
+         */
+         const char *oldpwd = getenv(ENV_OLDPWD);
+         if(oldpwd && *oldpwd == '/' && S_ISDIR(getStMode(oldpwd))) {
+             expanded = oldpwd;
+         }
     } else {
         struct passwd *pw = getpwnam(expanded.c_str() + 1);
         if(pw != nullptr) {

@@ -166,11 +166,10 @@ void raiseSystemError(DSState &st, int errorNum, std::string &&message);
  *
  * @param st
  * @param useLogical
- * @param buf
  * @return
  * if has error, return null and set errno.
  */
-const char *getWorkingDir(const DSState &st, bool useLogical, std::string &buf);
+CStrPtr getWorkingDir(const DSState &st, bool useLogical);
 
 /**
  * change current working directory and update OLDPWD, PWD.
@@ -203,6 +202,15 @@ DSValue getSignalHandler(const DSState &st, int sigNum);
  */
 void setJobControlSignalSetting(DSState &st, bool set);
 
+/**
+ * expand dot '.' '..'
+ * @param basePath
+ * may be null. must be full path.
+ * @param path
+ * may be null
+ * @return
+ * if expansion failed, return empty string
+ */
 std::string expandDots(const char *basePath, const char *path);
 
 void expandTilde(std::string &str);

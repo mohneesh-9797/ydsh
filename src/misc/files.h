@@ -63,6 +63,19 @@ inline CStrPtr getCWD() {
     return getRealpath(".");
 }
 
+inline bool isSameFile(const char *f1, const char *f2) {
+    struct stat st1;
+    if(stat(f1, &st1) != 0) {
+        return false;
+    }
+
+    struct stat st2;
+    if(stat(f2, &st2) != 0) {
+        return false;
+    }
+    return st1.st_dev == st2.st_dev && st1.st_ino == st2.st_ino;
+}
+
 inline int getFileList(const char *dirPath, bool recursive, std::vector<std::string> &results) {
     for(std::list<std::string> dirList = {dirPath}; !dirList.empty();) {
         std::string path = std::move(dirList.front());
@@ -206,6 +219,7 @@ public:
             env = "/tmp";
         }
         auto ptr = getRealpath(env);
+        assert(ptr);
         std::string name = ptr.get();
         name += "/test_tmp_dirXXXXXX";
         if(!mkdtemp(&name[0])) {

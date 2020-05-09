@@ -20,8 +20,6 @@
 
 #include <unistd.h>
 #include <sys/utsname.h>
-#include <pwd.h>
-#include <libgen.h>
 
 #include <ydsh/ydsh.h>
 #include <embed.h>
@@ -30,32 +28,9 @@
 #include "logger.h"
 #include "frontend.h"
 #include "codegen.h"
-#include "misc/num_util.hpp"
 #include "misc/files.h"
 
 using namespace ydsh;
-
-/**
- * if environmental variable SHLVL dose not exist, set 0.
- */
-static unsigned int getShellLevel() {
-    char *shlvl = getenv(ENV_SHLVL);
-    unsigned int level = 0;
-    if(shlvl != nullptr) {
-        auto pair = convertToNum<int64_t>(shlvl);
-        if(!pair.second) {
-            level = 0;
-        } else {
-            level = pair.first;
-        }
-    }
-    return level;
-}
-
-static unsigned int originalShellLevel() {
-    static unsigned int level = getShellLevel();
-    return level;
-}
 
 static int evalCode(DSState &state, const CompiledCode &code, DSError *dsError) {
     if(state.dumpTarget.files[DS_DUMP_KIND_CODE]) {
@@ -384,47 +359,12 @@ static void loadEmbeddedScript(DSState *state) {
     state->symbolTable.getTermHookIndex();
 }
 
-static void initEnv(const DSState &state) {
-    // set locale
-    setlocale(LC_ALL, "");
-    setlocale(LC_MESSAGES, "C");
-
-    // set environmental variables
-
-    // update shell level
-    setenv(ENV_SHLVL, std::to_string(originalShellLevel() + 1).c_str(), 1);
-
-    // set HOME
-    struct passwd *pw = getpwuid(getuid());
-    if(pw == nullptr) {
-        fatal_perror("getpwuid failed\n");
-    }
-    setenv(ENV_HOME, pw->pw_dir, 0);
-
-    // set LOGNAME
-    setenv(ENV_LOGNAME, pw->pw_name, 0);
-
-    // set USER
-    setenv(ENV_USER, pw->pw_name, 0);
-
-    // set PWD/OLDPWD
-    std::string str;
-    const char *ptr = getWorkingDir(state, true, str);
-    if(ptr == nullptr) {
-        ptr = ".";
-    }
-    setenv(ENV_PWD, ptr, 0);
-    setenv(ENV_OLDPWD, ptr, 0);
-}
-
 // ###################################
 // ##     public api of DSState     ##
 // ###################################
 
 DSState *DSState_createWithMode(DSExecMode mode) {
     auto *ctx = new DSState();
-
-    initEnv(*ctx);
     initBuiltinVar(*ctx);
     loadEmbeddedScript(ctx);
 
@@ -647,15 +587,12 @@ int DSState_loadAndEval(DSState *st, const char *sourceName, DSError *e) {
     return evalScript(*st, Lexer(sourceName, std::move(buf), std::move(scriptDir)), e);
 }
 
-static void appendAsEscaped(std::string &line, const char *path) {  //FIXME: escape newline
+static void appendAsEscaped(std::string &line, const char *path) {
+    line += '"';
     while(*path) {
         int ch = *(path++);
         switch(ch) {
-        case ' ': case '\t': case '\r': case '\n':
-        case '\\': case ';': case '\'': case '"':
-        case '`': case '|': case '&': case '<':
-        case '>': case '(': case ')': case '$':
-        case '#': case '*': case '?':
+        case '"': case '$': case '\\':
             line +='\\';
             break;
         default:
@@ -663,6 +600,7 @@ static void appendAsEscaped(std::string &line, const char *path) {  //FIXME: esc
         }
         line += static_cast<char>(ch);
     }
+    line += '"';
 }
 
 int DSState_loadModule(DSState *st, const char *fileName, unsigned short option, DSError *e) {

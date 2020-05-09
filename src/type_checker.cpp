@@ -984,9 +984,7 @@ void TypeChecker::checkPatternType(ArmNode &node, PatternCollector &collector) {
     }
 
     for(auto &e : node.refPatternNodes()) {
-        if(!this->applyConstFolding(e)) {
-            RAISE_TC_ERROR(Constant, *e);
-        }
+        this->applyConstFolding(e);
     }
 
     for(auto &e : node.getPatternNodes()) {
@@ -1025,19 +1023,28 @@ bool TypeChecker::applyConstFolding(std::unique_ptr<Node> &node) const {
     case NodeKind::String:
     case NodeKind::Number:
     case NodeKind::Regex:
+    case NodeKind::WildCard:
         return true;
-    case NodeKind::UnaryOp: {
+    case NodeKind::UnaryOp: { // !, +, -, !
+        auto &unaryNode = cast<UnaryOpNode>(*node);
         Token token = node->getToken();
-        assert(cast<UnaryOpNode>(*node).getOp() == MINUS);
-        auto &applyNode = cast<UnaryOpNode>(*node).refApplyNode();
-        assert(applyNode->getExprNode().is(NodeKind::Access));
-        auto &accessNode = cast<AccessNode>(applyNode->getExprNode());
-        assert(accessNode.getRecvNode().is(NodeKind::Number));
-        auto &numNode = cast<NumberNode>(accessNode.getRecvNode());
-
-        if(node->getType().is(TYPE::Int)) {
-            int64_t value = numNode.getIntValue();
-            value = -value;
+        const auto op = unaryNode.getOp();
+        if(node->getType().is(TYPE::Int) && (op == MINUS || op == PLUS || op == NOT)) {
+            auto &applyNode = unaryNode.refApplyNode();
+            assert(applyNode->getExprNode().is(NodeKind::Access));
+            auto &accessNode = cast<AccessNode>(applyNode->getExprNode());
+            auto &recvNode = accessNode.refRecvNode();
+            if(!this->applyConstFolding(recvNode)) {
+                break;
+            }
+            assert(isa<NumberNode>(*recvNode));
+            int64_t value = cast<NumberNode>(*recvNode).getIntValue();
+            if(op == MINUS) {
+                value = -value;
+            } else if(op == NOT) {
+                uint64_t v = ~static_cast<uint64_t>(value);
+                value = static_cast<int64_t>(v);
+            }
             node = NumberNode::newInt(token, value);
             node->setType(this->symbolTable.get(TYPE::Int));
             return true;
@@ -1046,9 +1053,23 @@ bool TypeChecker::applyConstFolding(std::unique_ptr<Node> &node) const {
     }
     case NodeKind::StringExpr: {
         auto &exprNode = cast<StringExprNode>(*node);
-        if(exprNode.getExprNodes().size() == 1 && exprNode.getExprNodes()[0]->is(NodeKind::String)) {
-            auto *strNode = exprNode.refExprNodes()[0].release();
-            node.reset(strNode);
+        Token token = node->getToken();
+        std::string value;
+        for(auto &e : exprNode.refExprNodes()) {
+            if(!this->applyConstFolding(e)) {
+                break;
+            }
+            assert(isa<StringNode>(*e));
+            value += cast<StringNode>(*e).getValue();
+        }
+        node = std::make_unique<StringNode>(token, std::move(value));
+        node->setType(this->symbolTable.get(TYPE::String));
+        return true;
+    }
+    case NodeKind::Embed: {
+        auto &embedNode = cast<EmbedNode>(*node);
+        if(!embedNode.getHandle() && this->applyConstFolding(embedNode.refExprNode())) {
+            node = std::move(embedNode.refExprNode());
             return true;
         }
         break;
@@ -1056,7 +1077,7 @@ bool TypeChecker::applyConstFolding(std::unique_ptr<Node> &node) const {
     default:
         break;
     }
-    return false;
+    RAISE_TC_ERROR(Constant, *node);
 }
 
 void TypeChecker::checkTypeAsBreakContinue(JumpNode &node) {
@@ -1428,14 +1449,6 @@ void TypeChecker::visitSourceNode(SourceNode &node) {
     node.setType(this->symbolTable.get(node.isNothing() ? TYPE::Nothing : TYPE::Void));
 }
 
-void TypeChecker::checkSourcePath(CmdArgNode &node) {
-    for(auto &e : node.getSegmentNodes()) {
-        if(!isa<StringNode>(*e)) {
-            RAISE_TC_ERROR(Constant, *e);
-        }
-    }
-}
-
 void TypeChecker::resolvePathList(SourceListNode &node) {
     std::vector<std::string> ret;
     if(node.getPathNode().getGlobPathSize() == 0) {
@@ -1461,7 +1474,9 @@ void TypeChecker::visitSourceListNode(SourceListNode &node) {
         RAISE_TC_ERROR(OutsideToplevel, node);
     }
     this->checkType(this->symbolTable.get(TYPE::String), node.getPathNode());
-    this->checkSourcePath(node.getPathNode());
+    for(auto &e : node.getPathNode().refSegmentNodes()) {
+        this->applyConstFolding(e);
+    }
     this->resolvePathList(node);
     node.setType(this->symbolTable.get(TYPE::Void));
 }
@@ -1469,22 +1484,6 @@ void TypeChecker::visitSourceListNode(SourceListNode &node) {
 void TypeChecker::visitEmptyNode(EmptyNode &node) {
     node.setType(this->symbolTable.get(TYPE::Void));
 }
-
-struct NodeWrapper {
-    Node *ptr;
-
-    explicit NodeWrapper(std::unique_ptr<Node> &&ptr) : ptr(ptr.release()) {}
-
-    ~NodeWrapper() {
-        delete this->ptr;
-    }
-
-    std::unique_ptr<Node> release() {
-        Node *old = nullptr;
-        std::swap(this->ptr, old);
-        return std::unique_ptr<Node>(old);
-    }
-};
 
 static bool mayBeCmd(const Node &node) {
     if(node.is(NodeKind::Cmd)) {
