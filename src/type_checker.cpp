@@ -1556,22 +1556,39 @@ struct SourceGlobMeta {
     }
 };
 
-void TypeChecker::resolvePathList(SourceListNode &node) {
-    std::vector<std::string> ret;
-    if(node.getPathNode().getGlobPathSize() == 0) {
-        std::string path;
-        for(auto &e : node.getPathNode().getSegmentNodes()) {
-            assert(isa<StringNode>(*e));
-            path += cast<StringNode>(*e).getValue();
-        }
+static std::string concat(const CmdArgNode &node) {
+    std::string path;
+    for(auto &e : node.getSegmentNodes()) {
+        assert(isa<StringNode>(*e));
+        path += cast<StringNode>(*e).getValue();
+    }
+    return path;
+}
 
-        auto &first = *node.getPathNode().getSegmentNodes()[0];
+void TypeChecker::resolvePathList(SourceListNode &node) {
+    auto &pathNode = node.getPathNode();
+    std::vector<std::string> ret;
+    if(pathNode.getGlobPathSize() == 0) {
+        std::string path = concat(pathNode);
+        auto &first = *pathNode.getSegmentNodes()[0];
         if(isa<StringNode>(first) && cast<StringNode>(first).isTilde()) {
             expandTilde(path);
         }
         ret.push_back(std::move(path));
     } else {
-        fatal("unsupported\n");
+        pathNode.addSegmentNode(std::make_unique<EmptyNode>()); // sentinel
+        auto begin = SourceGlobIter(pathNode.getSegmentNodes().cbegin());
+        auto end = SourceGlobIter(pathNode.getSegmentNodes().cend());
+        auto appender = [&](std::string &&path) {
+            ret.push_back(std::move(path));
+        };
+        unsigned int globRet = glob<SourceGlobMeta>(begin, end, appender, WildMatchOption{});
+        if(globRet || node.isOptional()) {
+            std::sort(ret.begin(), ret.end());
+        } else {
+            std::string path = concat(pathNode);
+            RAISE_TC_ERROR(NoGlobMatch, pathNode, path.c_str());
+        }
     }
     node.setPathList(std::move(ret));
 }
