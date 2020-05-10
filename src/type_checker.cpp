@@ -21,6 +21,7 @@
 #include "constant.h"
 #include "core.h"
 #include "type_checker.h"
+#include "misc/glob.hpp"
 
 namespace ydsh {
 
@@ -1491,6 +1492,69 @@ void TypeChecker::visitSourceNode(SourceNode &node) {
     }
     node.setType(this->symbolTable.get(node.isNothing() ? TYPE::Nothing : TYPE::Void));
 }
+
+class SourceGlobIter {
+private:
+    using iterator = SourceListNode::path_iterator ;
+
+    iterator cur;
+    const char *ptr{nullptr};
+
+public:
+    explicit SourceGlobIter(iterator begin) : cur(begin) {
+        if(isa<StringNode>(**this->cur)) {
+            this->ptr = cast<StringNode>(**this->cur).getValue().c_str();
+        }
+    }
+
+    char operator*() const {
+        return this->ptr == nullptr ? '\0' : *this->ptr;
+    }
+
+    bool operator==(const SourceGlobIter &other) const {
+        return this->cur == other.cur && this->ptr == other.ptr;
+    }
+
+    bool operator!=(const SourceGlobIter &other) const {
+        return !(*this == other);
+    }
+
+    SourceGlobIter &operator++() {
+        if(this->ptr) {
+            this->ptr++;
+            if(*this->ptr == '\0') {  // if StringRef iterator reaches null, increment DSValue iterator
+                this->ptr = nullptr;
+            }
+        }
+        if(!this->ptr) {
+            this->cur++;
+            if(isa<StringNode>(**this->cur)) {
+                this->ptr = cast<StringNode>(**this->cur).getValue().c_str();
+            }
+        }
+        return *this;
+    }
+
+    iterator getIter() const {
+        return this->cur;
+    }
+};
+
+struct SourceGlobMeta {
+    static bool isAny(SourceGlobIter iter) {
+        auto &node = **iter.getIter();
+        return isa<WildCardNode>(node) && cast<WildCardNode>(node).meta == GlobMeta::ANY;
+    }
+
+    static bool isZeroOrMore(SourceGlobIter iter) {
+        auto &node = **iter.getIter();
+        return isa<WildCardNode>(node) && cast<WildCardNode>(node).meta == GlobMeta::ZERO_OR_MORE;
+    }
+
+    static void preExpand(std::string &path) {
+        expandTilde(path);
+    }
+};
 
 void TypeChecker::resolvePathList(SourceListNode &node) {
     std::vector<std::string> ret;
