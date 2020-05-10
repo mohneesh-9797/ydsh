@@ -257,6 +257,9 @@ FrontEnd::Ret FrontEnd::loadModule(DSError *dsError) {
     }
 
     if(!this->getCurSrcListNode()->hasUnconsumedPath()) {
+        if(this->getCurSrcListNode()->getPathList().empty()) {
+            return {std::make_unique<EmptyNode>(), IN_MODULE};
+        }
         this->getCurSrcListNode().reset();
         return {nullptr, IN_MODULE};
     }
