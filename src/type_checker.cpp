@@ -1587,7 +1587,13 @@ void TypeChecker::resolvePathList(SourceListNode &node) {
         auto appender = [&](std::string &&path) {
             ret.push_back(std::move(path));
         };
-        unsigned int globRet = glob<SourceGlobMeta>(begin, end, appender, WildMatchOption{});
+        WildMatchOption option{};
+        if(isa<StringNode>(*pathNode.getSegmentNodes().front())) {
+            if(cast<StringNode>(*pathNode.getSegmentNodes().front()).isTilde()) {
+                setFlag(option, WildMatchOption::TILDE);
+            }
+        }
+        unsigned int globRet = glob<SourceGlobMeta>(begin, end, appender, option);
         if(globRet || node.isOptional()) {
             std::sort(ret.begin(), ret.end());
         } else {
